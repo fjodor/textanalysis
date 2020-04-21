@@ -1,0 +1,376 @@
+---
+title: "Textanalyse mit R"
+author: "WR"
+date: "Erstellt: `r Sys.time()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+    code_folding: hide
+---
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(knitr)
+library(DT)
+# library(htmlTable)
+library(tidystringdist)
+
+daten <- tribble(
+  ~warum_sport,
+  "Muskelaufbau",
+  "Ich will gut aussehen",
+  "besser aussehen",
+  "Aussehen",
+  "Ich will Muskeln aufbauen",
+  "muskulär verbessern",
+  "Prävention",
+  "gesund bleiben",
+  "Fitness",
+  "Reha",
+  "will ich ausdauernder werden",
+  "Ausdauer verbessern",
+  "In Form kommen",
+  "Formaufbau",
+  "Reha-Training",
+  "Rehabilitation",
+  "fitness",
+  "formaufbau",
+  "Muskeltraining",
+  "Rückenprävention",
+  "Rückenschmerzen vorbeugen",
+  "Aus verschiedenen Gründen",
+  "Diverse Gründe",
+  "Mehrere Gründe"
+)
+
+daten <- daten %>%
+  mutate(id = 1:nrow(daten)) %>% 
+  select(id, warum_sport) %>% 
+  arrange(warum_sport)
+
+
+```
+
+
+# Beispieldaten
+
+Frage: Warum treiben Sie Sport? Bitte nennen Sie **den wichtigsten Grund**, d. h. nur einen Grund, keine Mehrfachangaben.
+
+Daten, alphabetisch sortiert nach Gründen für Sport:
+
+```{r beispieldaten}
+
+# kable(daten)
+# Platz sparen: Tabelle über zwei Spalten?
+# Möglich, aber umständlich
+# Quelle: https://stackoverflow.com/questions/43984289/how-to-split-kable-over-multiple-columns
+
+datatable(daten, rownames = FALSE, options = list(pageLength = nrow(daten)))
+
+```
+
+
+# Vorgegebene Kategorien zuordnen
+
+## stringr
+
+* Alle Funktionen beginnen mit str_
+* Schnelle Übersicht per Kontextmenü in RStudio: ?str_
+
+```{r kategorien}
+
+kategorien <- c("Ausdauer", "Aussehen", "Gesundheit / Prävention allg.", "Muskeln aufbauen", "Fitness / Form allg.", "Rehabilitation", "Rückenschmerzen vorbeugen / lindern", "Sonstiges")
+kable(kategorien, col.names = "Kategorien")
+
+```
+
+### Zuordnung mit stringr und case_when
+
+```{r str_detect_case_when}
+
+daten <- daten %>% 
+  mutate(warum_sport_c = case_when(
+  str_detect(warum_sport, "Ausdauer") ~ "Ausdauer",
+  str_detect(warum_sport, "Aussehen") ~ "Aussehen",
+  str_detect(warum_sport, "Fitness") ~ "Fitness / Form allg.",
+  str_detect(warum_sport, "Form") ~ "Fitness / Form allg.",
+  str_detect(warum_sport, "gesund") ~ "Gesundheit / Prävention allg.",
+  str_detect(warum_sport, "Prävention") ~ "Gesundheit / Prävention allg.",
+  str_detect(warum_sport, "Muskel") ~ "Muskeln aufbauen",
+  str_detect(warum_sport, "Reha") ~ "Rehabilitation",
+  str_detect(warum_sport, "Rücken") ~ "Rückenschmerzen vorbeugen / lindern",
+  TRUE ~ "Sonstiges")
+)
+
+daten %>% 
+  arrange(warum_sport_c) %>% 
+  kable()
+
+```
+
+Einigermaßen schick, aber: 
+
+* Groß- und Kleinschrift: "aussehen" statt "Aussehen" wird nicht erkannt; "form" und "fitness" ebenfalls nicht.
+* "muskulär" statt "Muskel" wird nicht erkannt
+* Zwei separate Zeilen für Gesundheit / Prävention allg.
+
+### Verbesserung: Groß- und Kleinschrift
+
+fixed() sucht Zeichenketten "wörtlich", d. h. ohne sie als reguläre Ausdrücke zu interpretieren. Enthält das nützliche Argument *ignore_case*, mit dem man Unterschiede in Groß- / Kleinschrift ignorieren kann. Schnell, aber ungenau.
+
+Variante: coll() sucht Zeichenketten "wörtlich", berücksichtigt Gebietsschema, daher genauer als fixed(), langsamer.
+
+```{r str_detect_ignore_case}
+
+daten <- daten %>% 
+  mutate(warum_sport_c = case_when(
+    str_detect(warum_sport, "Ausdauer") ~ "Ausdauer",
+    str_detect(warum_sport, coll("Aussehen", ignore_case = TRUE, locale = "de_DE")) ~ "Aussehen",
+    str_detect(warum_sport, "Fitness") ~ "Fitness / Form allg.",
+    str_detect(warum_sport, "Form") ~ "Fitness / Form allg.",
+    str_detect(warum_sport, "gesund") ~ "Gesundheit / Prävention allg.",
+    str_detect(warum_sport, "Prävention") ~ "Gesundheit / Prävention allg.",
+    str_detect(warum_sport, "Muskel") ~ "Muskeln aufbauen",
+    str_detect(warum_sport, "Reha") ~ "Rehabilitation",
+    str_detect(warum_sport, "Rücken") ~ "Rückenschmerzen vorbeugen / lindern",
+    TRUE ~ "Sonstiges"
+  )
+)
+
+daten %>% 
+  arrange(warum_sport_c) %>% 
+  kable()
+
+```
+
+* Besser: Aussehen und aussehen werden gleichermaßen erkannt.
+* Umständlich, viel Redundanz (in jeder Zeile wiederholt sich *warum_sport*)
+* Groß- / Kleinschreibung müssten wir ggf. in allen Zeilen wiederholen
+
+### Verbesserung: Eigene Funktion
+
+```{r str_detect_own_function}
+
+str_detect_sport <- function(Muster) {
+  str_detect(daten$warum_sport, coll(Muster, ignore_case = TRUE, locale = "de_DE"))
+}
+
+daten$warum_sport_c <- NA
+
+daten <- daten %>% 
+  mutate(warum_sport_c = case_when(
+    str_detect_sport("Ausdauer") ~ "Ausdauer",
+    str_detect_sport("Aussehen") ~ "Aussehen",
+    str_detect_sport("Fitness") ~ "Fitness / Form allg.",
+    str_detect_sport("Form") ~ "Fitness / Form allg.",
+    str_detect_sport("gesund") ~ "Gesundheit / Prävention allg.",
+    str_detect_sport("Prävention") ~ "Gesundheit / Prävention allg.",
+    str_detect_sport("Muskel") ~ "Muskeln aufbauen",
+    str_detect_sport("Reha") ~ "Rehabilitation",
+    str_detect_sport("Rücken") ~ "Rückenschmerzen vorbeugen / lindern",
+    TRUE ~ "Sonstiges"
+  )
+)
+
+daten %>% 
+  arrange(warum_sport_c) %>% 
+  kable()
+  
+```
+
+**TODO**: Alternative zeigen: Vor Zuordnung Variable (temporär?) in nur Groß- oder nur Kleinschrift umwandeln
+
+
+### Verbesserung: Reguläre Ausdrücke
+
+* Muskel / muskul finden
+* Einzeiler für zwei unterschiedliche Varianten: "gesund" oder "Prävention"
+
+```{r str_detect_regex}
+
+str_detect_regex <- function(Muster) {
+  str_detect(daten$warum_sport, regex(Muster, ignore_case = TRUE))
+}
+
+daten$warum_sport_c <- NA
+
+daten <- daten %>% 
+  mutate(warum_sport_c = case_when(
+    str_detect_regex("Ausdauer") ~ "Ausdauer",
+    str_detect_regex("Aussehen") ~ "Aussehen",
+    str_detect_regex("(Fitness|Form)") ~ "Fitness / Form allg.",
+    str_detect_regex("Rücken") ~ "Rückenschmerzen vorbeugen / lindern",
+    str_detect_regex("(gesund|Prävention)") ~ "Gesundheit / Prävention allg.",
+    str_detect_regex("Musk(e|u)l") ~ "Muskeln aufbauen",
+    str_detect_regex("Reha") ~ "Rehabilitation",
+    TRUE ~ "Sonstiges"
+  )
+)
+
+daten %>% 
+  arrange(warum_sport_c) %>% 
+  kable()
+
+
+```
+
+* Weniger Code-Zeilen: Muskeln / muskulär in einer Zeile erfasst; gesund / Prävention in einer Zeile erfasst
+* Groß- und Kleinschrift in der eigenen Funktion definiert
+* Spezifischere Fälle vor allgemeineren Fällen: Rückenprävention muss für Präventation allg. zugeordnet werden (case_when reagiert auf den ersten Treffer)
+
+
+## Weitere Informationen zu stringr
+
+stringr besser kennen lernen:
+
+* Siehe *help(package = "stringr"): Es gibt zwei Vignetten.
+    + Introduction to stringr
+    + Regular expressions
+* RStudio Cheatsheet: siehe https://github.com/rstudio/cheatsheets/raw/master/strings.pdf
+
+
+# Automatisierte Zuordnung aufgrund von Text-Ähnlichkeiten
+
+## Datenbasis: Automarken
+
+```{r Automarken}
+
+autos <- tribble(
+  ~Marke_org,
+  "Volkswagen",
+  "VW-Verräter",
+  "Audi",
+  "Audi Ingolstadt",
+  "Mercedes",
+  "Daimler-Benz",
+  "BMW",
+  "Bayerische Motoren-Werke",
+  "Mercedes AMG",
+  "Merzedes",
+  "Audi A6 quattro",
+  "VW Golf",
+  "mein lieber VW",
+  "BMW i3",
+  "BMW München",
+  "Volkswägelchen",
+  "Folgswachen",
+  "Bayerische Mist-Werke"
+)
+
+autos <- arrange(autos, Marke_org)
+
+datatable(autos, rownames = FALSE, options = list(pageLength = nrow(autos)))
+```
+
+
+## Datenaufbereitung
+
+### Abkürzungen vs. ausgeschriebene Markennamen
+
+Erste Herausforderung: Abkürzungen und ausgeschriebene Markennamen. Lösung: Abkürzungen zuordnen mit stringr::str_replace.  
+```{r Autos_Abkürzungen}
+
+autos <- autos %>%
+  mutate(Marke = str_replace(Marke_org, "VW", "Volkswagen"),
+         Marke = str_replace(Marke, "BMW", "Bayerische Motoren-Werke"))
+
+kable(autos)
+
+```
+
+### Sonderfall mit völlig unterschiedlichen Namen
+
+Daimler / Daimler-Benz als Mercedes zuordnen mit Regulären Ausdrücken.
+
+```{r Autos_Daimler}
+
+autos <- autos %>% 
+  mutate(Marke = str_replace(Marke, "(Daimler-Benz|Daimler)", "Mercedes"))
+
+kable(autos)
+
+```
+
+## Automatische Zuordnung anhand von Text-Ähnlichkeit
+
+Und jetzt wollen wir festgelegte Marken automatisiert zuordnen, ohne Marke für Marke mit regulären Ausdrücken zu hantieren.
+
+R-Paket: tidystringdist von Colin Fay
+
+Anwendungsbeispiel: https://community.rstudio.com/t/identifying-exact-or-near-duplicate-names-in-a-dataset/16870/5
+
+Hier modifiziert: Nicht jeden Eintrag mit jedem anderen vergleichen, sondern Vorgabe mit "richtigen" Schreibweisen
+
+### Raster anlegen: Alle Kombinationsmöglichkeiten
+
+Wir verwenden tidyr::crossing()  
+Dabei werden Duplikate entfernt. Wir haben `r length(unique(autos$Marke))` **unterschiedliche** Marken-Einträge von insgesamt `r length(autos$Marke)` Einträgen.
+
+```{r Autos_grid}
+
+marken <- c("Audi", "Bayerische Motoren-Werke", "Mercedes", "Volkswagen")
+
+zuordnungstabelle <- tidyr::crossing(autos$Marke, marken) %>% 
+  rename(Marke = `autos$Marke`, Marken_Vorlage = marken)
+
+# expand_grid entfernt keine Duplikate
+# Wir nehmen die reduzierte Zuordnungstabelle; ist lang genug!
+# Bei der späteren Zuordnung per join kommen wir wieder auf die ursprüngliche Anzahl Einträge.
+
+datatable(zuordnungstabelle)
+
+```
+
+Fallzahl: Anzahl **unterschiedlicher** Einträge mal Anzahl Kategorien
+
+### Ähnlichkeits-Score berechnen
+
+Es gibt verschiedene Maße. Wir wählen Jaccard. Das ist ein Distanzmaß - wir wandeln es um in ein Ähnlichkeitsmaß, d. h.: Je größer die Zahl, desto höher die Ähnlichkeit. Wertebereich: 0 bis 1.
+
+```{r Autos_jaccard, warning = FALSE}
+
+zuordnung <- tidy_stringdist(zuordnungstabelle, v1 = Marke, v2 = Marken_Vorlage) %>% 
+  mutate(score = round(1 - jaccard, 2)) %>% 
+  select(Marke, Marken_Vorlage, score)
+
+kable(head(zuordnung))
+
+```
+
+### Beste Treffer auswählen
+
+```{r Autos_top_score}
+
+zuordnung_top <- zuordnung %>% 
+  group_by(Marke) %>% 
+  summarise(max_score = max(score)) %>% 
+  ungroup()
+
+kable(head(zuordnung_top))
+
+```
+
+### Beste Treffer zu ursprünglichen Daten zuordnen
+
+```{r Autos_matching}
+
+# zuordnung ergänzen
+zuordnung <- zuordnung %>% 
+  inner_join(zuordnung_top, by = c("Marke", "score" = "max_score"))
+
+# Originaldaten: autos ergänzen
+
+autos <- autos %>% 
+  left_join(zuordnung, by = "Marke")
+
+datatable(autos, rownames = FALSE, options = list(pageLength = nrow(autos)))
+
+```
+
+Da wir nicht in einer perfekten Welt leben: Schnelle Lösung, funktioniert automatisiert - hier mit einem Fehler.
